@@ -115,11 +115,11 @@ class ModelSpeechToText:
         return list_of_words
 
 
-def preprocess_timit(timit_root: str) -> List[Tuple[str, str]]:
-    """Preprocesses TIMIT dataset.
+def preprocess_data(root: str) -> List[Tuple[str, str]]:
+    """Preprocesses dataset.
 
     Args:
-        timit_root: The path to the root directory of the TIMIT dataset.
+        root: The path to the root directory of the dataset.
         output_root: The path to the output directory for preprocessed files.
 
     Returns:
@@ -127,7 +127,7 @@ def preprocess_timit(timit_root: str) -> List[Tuple[str, str]]:
     """
     dataset = []
 
-    for audio_file in glob.glob(f"{timit_root}/**/*.wav", recursive=True):
+    for audio_file in glob.glob(f"{root}/**/*.wav", recursive=True):
         transcription_file = os.path.splitext(audio_file)[0] + ".txt"
         try:
             with open(transcription_file, "r") as f:
@@ -244,19 +244,19 @@ def evaluate_models(
     return metrics
 
 
-def run_evaluation(timit_root: str, model_paths: List[str]):
-    """Evaluate speech-to-text models using the TIMIT dataset.
+def run_evaluation(root: str, model_paths: List[str]):
+    """Evaluate speech-to-text models.
 
     Args:
-        timit_root: Path to the TIMIT dataset root directory.
+        root: Path to the dataset root directory.
         model_paths: A list of paths to the model directories.
     """
-    dataset = preprocess_timit(timit_root)
+    dataset = preprocess(root)
 
     train_dataset, evaluation_dataset = prepare_evaluation_dataset(dataset)
 
     models = [
-        ModelSpeechToText("How Bill Gates reads books.wav", model_path)
+        ModelSpeechToText("data_audio.wav", model_path)
         for model_path in model_paths
     ]
 
@@ -334,8 +334,8 @@ def main(args: argparse.Namespace):
         transcription = Transcription(words)
         print(transcription.to_raw_text())
 
-    timit_root = args.timit_root
-    metrics = run_evaluation(timit_root, vosk_model_paths)
+    root = args.root
+    metrics = run_evaluation(root, vosk_model_paths)
 
     model_names = [parse_model_name(model_path) for model_path in vosk_model_paths]
     plot_metrics(metrics, model_names)
@@ -344,10 +344,10 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Speech-to-text transcription")
     parser.add_argument(
-        "--timit_root",
+        "--root",
         "-d",
         required=True,
-        help="Path to the TIMIT dataset root directory",
+        help="Path to the dataset root directory",
     )
     parser.add_argument(
         "--vosk_model_paths",
