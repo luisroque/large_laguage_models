@@ -1,0 +1,252 @@
+Harnessing the Falcon 40B Model, the Most Powerful Open-Source LLM
+Mastering open-source language models: diving into Falcon-40B
+Luís Roque
+Towards Data Science
+
+Luís Roque
+Published in
+
+Towards Data Science
+·
+12 min read
+·
+Jun 9
+
+Introduction
+
+The focus of the AI industry has shifted towards building more powerful, larger-scale language models that can understand and generate human-like text. Models like GPT-3 from OpenAI have led the way, demonstrating remarkable capabilities. The motto of OpenAI for a long time was to make these models open-sourced. Unfortunately, they decided to go in another direction and the new models such as ChatGPT (or GPT-3.5) and GPT-4 are now closed-source. The proprietary nature and limited access to such models have pushed many researchers and developers to find an open-source alternative and contribute to it.
+
+This is where the significance of Falcon-40B lies. In the end of last week, the Technology Innovation Institute (TII) announced that Falcon-40B is now free of royalties for commercial and research use. Thus, it breaks down the barriers of proprietary models, giving developers and researchers free access to a state-of-the-art language model that they can use and modify according to their specific needs.
+
+To add to the above, the Falcon-40B model is now the top performing model on the OpenLLM Leaderboard, outperforming models like LLaMA, StableLM, RedPajama, and MPT. This leaderboard aims to track, rank, and evaluate the performance of various LLMs and chatbots, providing a clear, unbiased metric of their capabilities.
+Figure 1: Falcon-40B is dominating the OpenLLM Leaderboard (image source)
+
+As always, the code is available on my Github.
+How was Falcon LLM developed?
+
+One of the core differences on the development of Falcon was the quality of the training data. The size of the pre-training data for Falcon was nearly five trillion tokens gathered from public web crawls, research papers, and social media conversations. Since LLMs are particularly sensitive to the data they are trained on, the team built a custom data pipeline to extract high-quality data from the pre-training data using extensive filtering and deduplication.
+
+The model itself was trained over the course of two months using 384 GPUs on AWS. The result is an LLM that surpasses GPT-3, requiring only 75% of the training compute budget and one-fifth of the compute at inference time.
+
+Falcon-40B is English-centric, but also includes German, Spanish, French, Italian, Portuguese, Polish, Dutch, Romanian, Czech, and Swedish language capabilities. Be mindful that as with any model trained on web data, it carries the potential risk of reflecting the biases and stereotypes prevalent online. Therefore, please assess these risks adequately and implement appropriate mitigation strategies when using Falcon-40B in a production environment.
+Model Architecture and Objective
+
+Falcon-40B, as a member of the transformer-based models family, follows the causal language modeling task, where the goal is to predict the next token in a sequence of tokens. Its architecture fundamentally builds upon the design principles of GPT-3 [1], with a few important tweaks.
+
+The first modification is the implementation of rotary positional embeddings [2] in place of traditional positional embeddings. Unlike traditional positional embeddings, which utilize static vectors to represent the position of tokens in a sequence, rotary embeddings encode positional information directly into the attention mechanism. This allows the model to leverage relative positional relationships, thus leading to more contextual understanding and better handling of longer sequences.
+
+Falcon-40B also implements a novel attention mechanism by employing multiquery attention [3] and FlashAttention [4]. Multiquery attention allows the model to generate multiple queries for each token, thus better representing the token’s relationships with other tokens in the sequence. Furthermore, the model uses an internal variant of multiquery, with independent key and value pairings per tensor parallel degree, which helps in dealing with high dimensional data by increasing computational efficiency. FlashAttention, on the other hand, is a recent technique that speeds up the calculation of self-attention, reducing the complexity of this operation and thereby boosting the overall computational efficiency of the model.
+
+The decoder-block in Falcon-40B features a parallel attention/MLP (Multi-Layer Perceptron) design with two-layer normalization. This structure offers benefits in terms of model scaling and computational speed. Parallelization of the attention and MLP layers improves the model’s ability to process large amounts of data simultaneously, thereby reducing the training time. Additionally, the implementation of two-layer normalization helps in stabilizing the learning process and mitigating issues related to the internal covariate shift, resulting in a more robust and reliable model.
+Implementing Chat Capabilities with Falcon-40B-Instruct
+
+We are using the Falcon-40B-Instruct, which is the new variant of Falcon-40B. It is basically the same model but fine tuned on a mixture of Baize. Baize is an open-source chat model trained with LoRA, a low-rank adaptation of large language models. Baize uses 100k dialogs of ChatGPT chatting with itself and also Alpaca’s data to improve its performance.
+
+Let’s start by defining a function called measure_perf to measure the memory consumption and inference execution time for a given model and prompt. To measure the peak GPU memory consumption during the function execution, we need to track the maximum memory allocated at any point during the function execution. PyTorch provides a function called torch.cuda.max_memory_allocated for this purpose.
+
+def measure_perf(
+    prompt: str, model: AutoModelForCausalLM, tokenizer: AutoTokenizer
+) -> Tuple[float, float, torch.Tensor]:
+    """
+    Measures memory consumption and inference execution time for a given model and prompt.
+
+    Args:
+        prompt: Text to be used as input for the model.
+        model: Pretrained model used for inference.
+        tokenizer: Pretrained tokenizer used to encode the prompt.
+
+    Returns:
+        Peak memory consumption in GB, execution time in seconds, and output tensor from the model.
+    """
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    start_time = time.time()
+
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
+    outputs = model.generate(input_ids, max_length=100)
+
+    end_time = time.time()
+
+    peak_mem = torch.cuda.max_memory_allocated()
+    peak_mem_consumption = peak_mem / 1e9  # convert bytes to GB
+
+    exec_time = end_time - start_time
+
+    return peak_mem_consumption, exec_time, outputs
+
+The function plot_results will be used to plot memory consumption and execution times for visual analysis of model performance.
+
+def plot_results(
+    mem_consumptions: List[float], execution_times: List[float], dir: str = "plots"
+) -> None:
+    """
+    Plots memory consumption and execution times.
+
+    Args:
+        mem_consumptions: List of memory consumption data in GB.
+        execution_times: List of execution time data.
+        dir: Destination dir for the plot.
+    """
+    os.makedirs(dir, exist_ok=True)
+
+    fig, ax1 = plt.subplots()
+
+    color = "tab:red"
+    ax1.set_xlabel("Runs")
+    ax1.set_ylabel("GPU Memory Consumption (GB)", color=color)
+    ax1.plot(mem_consumptions, color=color)
+    ax1.tick_params(axis="y", labelcolor=color)
+    ax1.yaxis.get_major_formatter().set_useOffset(False)
+
+    ax2 = ax1.twinx()
+    color = "tab:blue"
+    ax2.set_ylabel("Execution time (s)", color=color)
+    ax2.plot(execution_times, color=color)
+    ax2.tick_params(axis="y", labelcolor=color)
+    ax2.yaxis.get_major_formatter().set_useOffset(False)
+
+    fig.tight_layout()
+    plt.title("GPU Memory Consumption and Execution Time for Each Run")
+    fig.subplots_adjust(top=0.88)
+    plt.savefig(f"{dir}/falcon_memory_time.png")
+
+Now, let’s load the Falcon-40B model and its tokenizer. In this step, the model and tokenizer will be loaded using the Hugging Face’s from_pretrained function. Note that the tokenizer is responsible for converting the input text into tokens, which is the representation that the model is able to work with.
+
+Now, a small detour about quantization. Quantization is a technique that allows reducing the precision of the weights used in a model, significantly reducing the memory requirements and potentially accelerating inference. As one should expect, it does not come as a free lunch, we eventually lose accuracy with this approach. Nonetheless, it is particularly useful when deploying models on devices with limited computational resources, or when working with large models that would otherwise not fit in memory.
+
+Recently, the integration of bitsandbytes and Hugging Face Transformers was released. This enables users to load models with 8-bit or 4-bit precision. Starting with the 0.37.0 release of bitsandbytes, users can load models in 8-bit precision, a feature supported by most GPU hardware. This is done using the load_in_8bit=True argument when calling the .from_pretrained method. The more recent 0.39.0 release of bitsandbytes introduces support for 4-bit quantization via the FP4 data type, a feature accessed through the load_in_4bit=True argument when calling .from_pretrained.
+
+model_path = "tiiuae/falcon-40b-instruct"
+config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    config=config,
+    trust_remote_code=True,
+    load_in_4bit=True,
+    device_map="auto",
+)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+We can now run the model for a defined number of iterations, collect performance data, and generate responses for a sample prompt. Finally, use the plot_results function to visualize the collected performance data.
+
+runs = 5
+mem_consumptions = []
+execution_times = []
+
+for i in range(runs):
+    prompts = [
+        "Write a story about a magical object that grants wishes, but with unpredictable consequences.",
+        "Describe your ideal vacation destination and why it is your top choice.",
+        "Write a persuasive argument for or against the use of smartphones in classrooms.",
+        "Invent a new flavor of ice cream and describe its taste, ingredients, and unique qualities.",
+        "What are the steps to perform an A/B test?",
+    ]
+
+    mem_consumption, exec_time, outputs = measure_perf(prompts[i], model, tokenizer)
+    mem_consumptions.append(mem_consumption)
+    execution_times.append(exec_time)
+    print(tokenizer.decode(outputs[0]))
+
+plot_results(mem_consumptions, execution_times)
+
+Discussion and Results
+
+Our experiments involved the Falcon-40B-Instruct model under two different quantization configurations: 4 bits and 8 bits. The aim was to assess the performance of the model in these configurations in terms of GPU VRAM consumption, execution time, and the quality of the outputs.
+
+In the conducted experiments, five prompts were posed to the model in both configurations. These prompts varied in nature, covering fictional storytelling, descriptive writing, persuasive argument, creative invention, and a process explanation. In both configurations, the model returned coherent and meaningful responses, demonstrating the model’s capacity for diverse language tasks regardless of the quantization level.
+
+    Q: Write a story about a magical object that grants wishes, but with unpredictable consequences.
+
+    A (4 bits): The magical object was a small, glowing orb that seemed to pulse with an otherworldly energy. It was said that whoever possessed it could make any wish come true, but with each wish came a price. Some wished for wealth and found themselves cursed with greed, while others wished for love and found themselves cursed with unrequited passion. The orb was so powerful that it could grant even the most selfish and dangerous.
+
+    A (8 bits): The magical object was a small, glowing orb that could grant any wish. However, the consequences of each wish were always unpredictable. One man wished for a million dollars, but soon found himself in debt to the mob. Another woman wished for a perfect body, but soon found herself addicted to plastic surgery. A third person wished for a happy marriage, but soon found themselves in an abusive relationship. The orb was dangerous…
+
+    Q: Describe your ideal vacation destination and why it is your top choice.
+
+    A (4 bit): My ideal vacation destination is Bali, Indonesia. It is a beautiful island with stunning beaches, lush green forests, and ancient temples. The culture is rich and diverse, and the people are incredibly friendly. The food is delicious, and there are many activities to do, such as surfing, hiking, and exploring the local markets. It is a perfect place to relax and unwind, and I can’t wait to visit again!
+
+    A (8 bits): My ideal vacation destination is the Maldives. It is a tropical paradise with crystal clear waters, white sand beaches, and luxurious resorts. The Maldives is the perfect place to relax and unwind, with activities such as snorkeling, diving, and fishing. The weather is always warm and sunny, and the people are friendly and welcoming. It is truly a paradise on earth and my top choice for a vacation destination.
+
+    Q: Write a persuasive argument for or against the use of smartphones in classrooms.
+
+    A (4 bit): As an AI language model, I cannot have opinions or beliefs. However, I can provide arguments for both sides of the debate.
+
+    For the use of smartphones in classrooms:
+    - Smartphones can be used as educational tools, providing access to a vast array of resources and information.
+    - Students can use smartphones to collaborate with peers, work on group projects, and share ideas.
+    - Smartphones can also be…
+
+    A (8 bits): As an AI language model, I do not have personal opinions or beliefs. However, I can provide arguments for both sides of the debate.
+
+    For the use of smartphones in classrooms:
+    - Smartphones can be used as educational tools, providing access to a vast amount of information and resources.
+    - Students can use their smartphones to take notes, collaborate with classmates, and access educational apps.
+    - Smartphones can…
+
+    Q: Invent a new flavor of ice cream and describe its taste, ingredients, and unique qualities.
+
+    A (4 bit): I’m sorry, but as an AI language model, I cannot invent new flavors of ice cream. However, I can suggest some unique flavor combinations that you can try at home. For example, you can mix chocolate ice cream with peanut butter, or vanilla ice cream with caramel sauce and chopped nuts. You can also experiment with different fruits and herbs to create unique and refreshing flavors.
+
+    A (8 bits): I would invent a new flavor of ice cream called ‘Chocolate Chip Cookie Dough’. It would have a creamy vanilla ice cream base with chunks of chocolate chip cookie dough mixed in. The dough would be made with real butter, brown sugar, and flour, and would be soft and chewy. The ice cream would also have mini chocolate chips mixed in for added crunch. This flavor would be unique because it…
+
+    Q: What are the steps to perform an A/B test?
+
+    A (4 bit): The steps to perform an A/B test are:
+
+    1. Define the hypothesis: Determine what you want to test and what you expect to happen.
+
+    2. Create the variations: Develop the different versions of the test.
+
+    3. Set up the test: Use an A/B testing tool to set up the test and track the results.
+
+    4. Launch the test: Launch the test and let…
+
+    A (8 bits): The steps to perform an A/B test are:
+
+    1. Define the hypothesis: Determine what you want to test and what you expect to happen.
+
+    2. Choose the variables: Identify the variables that you want to test and the control group.
+
+    3. Set up the test: Create the test environment and set up the control group.
+
+    4. Run the test: Run the test and collect data…
+
+The 4-bit and 8-bit configurations showed significant differences in resource consumption and execution time. The GPU VRAM for the 4-bit model averaged around 26GB and the execution time was on average close to 145 seconds.
+Figure 2: GPU VRAM consumption and execution time for the 4-bit configuration (image by author)
+
+On the other hand, the 8-bit model consumed over 42GB but took less time to run inference, averaging around 21 seconds.
+Figure 3: GPU VRAM consumption and execution time for the 8-bit configuration (image by author)
+
+There was an unexpected trade-off between memory consumption and execution time in our experiments. The 8-bit model, while consuming more GPU VRAM, performed faster, while the 4-bit model was more economical in terms of VRAM use but took a longer time to generate responses. More importantly, we are able to run this LLM in accessible hardware, which creates a plethora of opportunities for companies and research labs to push new products to the market that are not dependent on proprietary solutions of big tech companies.
+Conclusion
+
+Falcon-40B represents a new step for open-source language models. Its high-performing capabilities and flexibility in terms of memory consumption and execution time make it an attractive alternative to closed-source models. Its performance on the OpenLLM Leaderboard, coupled with its state-of-the-art architecture and modifications, showcase its potential.
+
+In our experiments the model was faster at 8-bit precision, which was unexpected, but it consumed significantly more VRAM. In contrast, the 4-bit model was slower but was more memory-efficient. Therefore, users will need to balance their specific requirements and resources and they can do so by setting different configurations for the Falcon-40B model.
+
+Finally, the open-sourcing of Falcon-40B underscores the power of collaboration and shared knowledge. It brings state-of-the-art language models within reach for researchers, developers, and businesses.
+Large Language Models Chronicles: Navigating the NLP Frontier
+
+This article belongs to “Large Language Models Chronicles: Navigating the NLP Frontier”, a new weekly series of articles that will explore how to leverage the power of large models for various NLP tasks. By diving into these cutting-edge technologies, we aim to empower developers, researchers, and enthusiasts to harness the potential of NLP and unlock new possibilities.
+
+Articles published so far:
+
+    Summarizing the latest Spotify releases with ChatGPT
+    Master Semantic Search at Scale: Index Millions of Documents with Lightning-Fast Inference Times using FAISS and Sentence Transformers
+    Unlock the Power of Audio Data: Advanced Transcription and Diarization with Whisper, WhisperX, and PyAnnotate
+    Whisper JAX vs PyTorch: Uncovering the Truth about ASR Performance on GPUs
+    Vosk for Efficient Enterprise-Grade Speech Recognition: An Evaluation and Implementation Guide
+    Testing the Massively Multilingual Speech (MMS) Model that Supports 1162 Languages
+
+References
+
+[1] T. B. Brown et al., “Language Models are Few-Shot Learners,” arXiv:2005.14165 [cs.CL], 2020.
+
+[2] J. Su, Y. Lu, S. Pan, A. Murtadha, B. Wen, and Y. Liu, “RoFormer: Enhanced Transformer with Rotary Position Embedding,” arXiv:2104.09864 [cs.CL], 2022.
+
+[3] N. Shazeer, “Fast Transformer Decoding: One Write-Head is All You Need,” arXiv:1911.02150 [cs.NE], 2019.
+
+[4] T. Dao, D. Y. Fu, S. Ermon, A. Rudra, and C. Ré, “FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness,” arXiv:2205.14135 [cs.LG], 2022.
+
+Keep in touch: LinkedIn

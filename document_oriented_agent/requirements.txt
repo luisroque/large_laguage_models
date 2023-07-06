@@ -1,0 +1,8 @@
+langchain==0.0.221
+uvicorn==0.22.0
+fastapi==0.99.1
+unstructured==0.7.12
+sentence-transformers==2.2.2
+chromadb==0.3.26
+openai==0.27.8
+python-dotenv==1.0.0
