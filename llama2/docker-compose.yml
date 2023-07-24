@@ -1,0 +1,22 @@
+version: '3'
+services:
+  web:
+    build: .
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "80"]
+    volumes:
+      - .:/app
+    ports:
+      - 8000:80
+    depends_on:
+      - redis
+  worker:
+    build: .
+    command: celery -A celery_worker worker --loglevel=info
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+  redis:
+    image: "redis:alpine"
+    ports:
+      - 6379:6379
