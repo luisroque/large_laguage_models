@@ -2,8 +2,6 @@
 
 Welcome to the GitHub repository of the **Large Language Models Chronicles**! This series on Medium is your guiding compass in the vast sea of Natural Language Processing, especially focusing on Large Language Models (LLMs). Here, you'll find code snippets, data, and resources supporting the articles published as part of the series.
 
-![GitHub stars](https://img.shields.io/github/stars/luisroque/large_laguage_models?style=social) 
-
 If you find our content valuable, ⭐️ the repo to support us!
 
 ## 📜 Articles Published So Far:
@@ -44,3 +42,5 @@ Contributions, issues, and feature requests are welcome! Feel free to check issu
     5. Open a Pull Request
 
 🙌 Thank you for your interest in our work. Let's navigate the NLP frontier together!
+
+[![Stargazers over time](https://starchart.cc/luisroque/large_laguage_models.svg)](https://starchart.cc/luisroque/large_laguage_models)
